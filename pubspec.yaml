@@ -31,8 +31,4 @@ dev_dependencies:
 # Configuración específica de Flutter.
 flutter:
   uses-material-design: true
-
-  # Si tienes assets (imágenes, fuentes), se declaran aquí.
-  # assets:
-  #   - assets/images/
-
+    - assets/
