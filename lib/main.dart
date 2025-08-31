@@ -1,105 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart';
-// SOLUCIÓN: Se importa el paquete 'path' con el prefijo 'p' para evitar conflictos.
-import 'package:path/path.dart' as p;
 import 'dart:math';
 
-// --- Modelo de Datos para la Mesa de Senos ---
-class MesaDeSenos {
-  int? id;
-  String nombre;
-  double g;
-  double g1;
-  double v;
-
-  MesaDeSenos({
-    this.id,
-    required this.nombre,
-    required this.g,
-    required this.g1,
-    required this.v,
-  });
-
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'nombre': nombre,
-      'g': g,
-      'g1': g1,
-      'v': v,
-    };
-  }
-
-  factory MesaDeSenos.fromMap(Map<String, dynamic> map) {
-    return MesaDeSenos(
-      id: map['id'],
-      nombre: map['nombre'],
-      g: map['g'],
-      g1: map['g1'],
-      v: map['v'],
-    );
-  }
-}
-
-// --- Gestor de la Base de Datos SQLite ---
-class DatabaseHelper {
-  static final DatabaseHelper _instance = DatabaseHelper._internal();
-  factory DatabaseHelper() => _instance;
-  DatabaseHelper._internal();
-
-  static Database? _database;
-
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDB();
-    return _database!;
-  }
-
-  Future<Database> _initDB() async {
-    String dbPath = await getDatabasesPath();
-    // SOLUCIÓN: Se usa el prefijo 'p' para llamar a la función join().
-    String path = p.join(dbPath, 'mesas.db');
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE mesas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL,
-            g REAL NOT NULL,
-            g1 REAL NOT NULL,
-            v REAL NOT NULL
-          )
-        ''');
-      },
-    );
-  }
-
-  Future<int> insertMesa(MesaDeSenos mesa) async {
-    final db = await database;
-    return await db.insert('mesas', mesa.toMap());
-  }
-
-  Future<List<MesaDeSenos>> getMesas() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('mesas');
-    return List.generate(maps.length, (i) {
-      return MesaDeSenos.fromMap(maps[i]);
-    });
-  }
-
-  Future<int> deleteMesa(int id) async {
-    final db = await database;
-    return await db.delete('mesas', where: 'id = ?', whereArgs: [id]);
-  }
-}
-
-// --- Inicio de la App ---
+// --- Punto de entrada de la aplicación ---
 void main() {
   runApp(const MyApp());
 }
 
+// --- Widget Raíz de la Aplicación ---
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -122,7 +29,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// --- Pantalla Principal ---
+// --- Pantalla Principal de la Calculadora (Stateful) ---
 class SineBarCalculatorScreen extends StatefulWidget {
   const SineBarCalculatorScreen({super.key});
 
@@ -131,322 +38,284 @@ class SineBarCalculatorScreen extends StatefulWidget {
 }
 
 class _SineBarCalculatorScreenState extends State<SineBarCalculatorScreen> {
-  final _hController = TextEditingController();
-  final _lController = TextEditingController();
-  final _gbController = TextEditingController();
-  final _gagePinController = TextEditingController();
-  final _angleController = TextEditingController();
+  // --- Controladores para los campos de texto ---
+  final angleController = TextEditingController();
+  final lengthController = TextEditingController(); // L
+  final heightController = TextEditingController(); // H
+  final distanceController = TextEditingController(); // Mesa de senos
+  final gController = TextEditingController();
+  final g1Controller = TextEditingController();
+  final vController = TextEditingController();
+  final gbController = TextEditingController();
+  final gagePinController = TextEditingController();
 
-  final _gController = TextEditingController();
-  final _g1Controller = TextEditingController();
-  final _vController = TextEditingController();
+  // --- Claves Globales para obtener la posición de los widgets ---
+  final Map<String, GlobalKey> _fieldKeys = {
+    'G': GlobalKey(),
+    'G1': GlobalKey(),
+    'V': GlobalKey(),
+    'GB': GlobalKey(),
+    'Angle': GlobalKey(),
+    'GagePin': GlobalKey(),
+  };
 
-  List<MesaDeSenos> _mesas = [];
-  MesaDeSenos? _selectedMesa;
+  String? _activeFieldKey; // Almacena la clave del campo activo
 
-  double _resultA = 0.0, _resultF = 0.0, _resultB = 0.0, _planerGageStack = 0.0;
-  double _resultZ = 0.0, _resultY = 0.0, _distanciaTotalOR = 0.0;
+  // --- Coordenadas de destino en la imagen (ajustar si es necesario) ---
+  final Map<String, Offset> _targetPoints = {
+    'G': const Offset(190, 240),
+    'G1': const Offset(190, 180),
+    'V': const Offset(230, 150),
+    'GB': const Offset(310, 150),
+    'Angle': const Offset(340, 215),
+    'GagePin': const Offset(280, 150),
+  };
+
+  // --- Nodos de Foco para detectar la selección ---
+  final Map<String, FocusNode> _focusNodes = {};
+
+  // --- Variables para los resultados ---
+  double resultA = 0.0, resultF = 0.0, resultB = 0.0, planerGageStackAB = 0.0;
+  double resultZ = 0.0, resultY = 0.0, distanciaTotalOR = 0.0;
   
   @override
   void initState() {
     super.initState();
-    _refreshMesas();
-  }
-  
-  void _refreshMesas() async {
-    final data = await DatabaseHelper().getMesas();
-    setState(() {
-      _mesas = data;
-      if (_mesas.isNotEmpty && _selectedMesa == null) {
-        _selectedMesa = _mesas.first;
-        _loadMesaData(_selectedMesa!);
-      } else if (_mesas.isEmpty) {
-        _selectedMesa = null;
-        _clearMesaData();
-      }
+    // Inicializar FocusNodes y añadir listeners
+    _fieldKeys.forEach((key, value) {
+      _focusNodes[key] = FocusNode()
+        ..addListener(() {
+          setState(() {
+            _activeFieldKey = (_focusNodes[key]!.hasFocus) ? key : null;
+          });
+        });
     });
   }
 
-  void _loadMesaData(MesaDeSenos mesa) {
-    _gController.text = mesa.g.toString();
-    _g1Controller.text = mesa.g1.toString();
-    _vController.text = mesa.v.toString();
-  }
-
-  void _clearMesaData() {
-     _gController.clear();
-     _g1Controller.clear();
-     _vController.clear();
-  }
-  
   void _performCalculations() {
-    final h = double.tryParse(_hController.text) ?? 0.0;
-    final l = double.tryParse(_lController.text) ?? 0.0;
-    final g = double.tryParse(_gController.text) ?? 0.0;
-    final g1 = double.tryParse(_g1Controller.text) ?? 0.0;
-    final v = double.tryParse(_vController.text) ?? 0.0;
-    final gb = double.tryParse(_gbController.text) ?? 0.0;
-    final gagePin = double.tryParse(_gagePinController.text) ?? 0.0;
-    final angleDeg = double.tryParse(_angleController.text) ?? 0.0;
+    // Convertir texto a double, con 0.0 como valor por defecto
+    final angleDeg = double.tryParse(angleController.text) ?? 0.0;
+    final length = double.tryParse(lengthController.text) ?? 0.0;
+    final height = double.tryParse(heightController.text) ?? 0.0;
+    final g = double.tryParse(gController.text) ?? 0.0;
+    final g1 = double.tryParse(g1Controller.text) ?? 0.0;
+    final v = double.tryParse(vController.text) ?? 0.0;
+    final gb = double.tryParse(gbController.text) ?? 0.0;
+    final gagePin = double.tryParse(gagePinController.text) ?? 0.0;
+
+    // --- CONVERSIÓN CRÍTICA: Grados a Radianes ---
     final angleRad = angleDeg * (pi / 180.0);
+    final angle45Rad = 45 * (pi / 180.0);
 
     setState(() {
-      _resultA = (sin(angleRad) * l) + (cos(angleRad) * h);
-      final angle45Rad = 45 * (pi / 180.0);
-      _resultF = ((cos(angle45Rad - angleRad) * sin(angle45Rad)) + 0.5);
-      _resultB = _resultF * gagePin;
-      _planerGageStack = _resultA - _resultB;
-
-      if (sin(angleRad) + cos(angleRad) - 1 != 0) {
-        _resultZ = (tan(angleRad) * gb) + (gagePin * sin(angleRad)) / (sin(angleRad) + cos(angleRad) - 1);
-      } else {
-        _resultZ = double.infinity;
-      }
-      _resultY = (_resultZ * cos(angleRad)) + (g1 * cos(angleRad)) - (v * cos(angleRad));
-      _distanciaTotalOR = g + _resultY;
+      // Fórmulas de la parte superior
+      resultA = (sin(angleRad) * length) + (cos(angleRad) * height);
+      resultF = ((cos(angle45Rad - angleRad) * sin(angle45Rad)) + 0.5);
+      resultB = resultF * gagePin;
+      planerGageStackAB = resultA - resultB;
+      
+      // Fórmulas de la parte inferior
+      final denominatorZ = sin(angleRad) + cos(angleRad) - 1;
+      resultZ = (denominatorZ != 0)
+          ? (tan(angleRad) * gb) + (gagePin * sin(angleRad)) / denominatorZ
+          : double.infinity;
+      
+      resultY = (resultZ * cos(angleRad)) + (g1 * cos(angleRad)) - (v * cos(angleRad));
+      distanciaTotalOR = g + resultY;
     });
-  }
-  
-  Widget _buildTextField(
-      {required TextEditingController controller,
-      required String label,
-      bool enabled = true}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: TextField(
-        controller: controller,
-        decoration: InputDecoration(labelText: label, fillColor: enabled ? Colors.grey[200] : Colors.grey[350]),
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        enabled: enabled,
-      ),
-    );
-  }
-
-  Widget _buildResultRow(String label, double value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 16, color: Colors.black87)),
-          Text(
-            value.isNaN || value.isInfinite ? 'Error' : value.toStringAsFixed(4),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _navigateToManageMesas() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const ManageMesasScreen()),
-    );
-    _refreshMesas();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Calculadora de Mesa de Senos'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _navigateToManageMesas,
-            tooltip: 'Gestionar Mesas',
+      appBar: AppBar(title: const Text('Calculadora de Mesa de Senos')),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Imagen como guía
+                Image.asset('assets/diagrama_completo.png'),
+                const SizedBox(height: 24),
+                
+                // Campos de texto con claves
+                _buildTextField('Ángulo en decimales', angleController, 'Angle'),
+                _buildTextField('Length (L)', lengthController),
+                _buildTextField('Height (H)', heightController),
+                _buildTextField('Distancia entre centros', distanceController),
+                _buildTextField('G (GROSOR BASE MESA DE SENOS)', gController, 'G'),
+                _buildTextField('G1 (GROSOR MESA DE SENOS)', g1Controller, 'G1'),
+                _buildTextField('V (VERTICE DE PIVOTEO)', vController, 'V'),
+                _buildTextField('GB (GAGE BLOCK)', gbController, 'GB'),
+                _buildTextField('Ø (DIAMETRO DE GAGE PIN)', gagePinController, 'GagePin'),
+                
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () {
+                    FocusScope.of(context).unfocus(); // Ocultar teclado
+                    _performCalculations();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    textStyle: const TextStyle(fontSize: 18),
+                  ),
+                  child: const Text('Calcular'),
+                ),
+                const SizedBox(height: 24),
+                _buildResultsCard(), // Widget para mostrar resultados
+              ],
+            ),
+          ),
+          // --- Capa para dibujar la flecha ---
+          CustomPaint(
+            painter: ArrowPainter(
+              activeFieldKey: _activeFieldKey,
+              fieldKeys: _fieldKeys,
+              targetPoints: _targetPoints,
+            ),
+            child: Container(),
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Seleccionar Mesa de Senos', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              if (_mesas.isNotEmpty)
-                DropdownButtonFormField<MesaDeSenos>(
-                  value: _selectedMesa,
-                  items: _mesas.map((mesa) {
-                    return DropdownMenuItem<MesaDeSenos>(
-                      value: mesa,
-                      child: Text(mesa.nombre),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedMesa = value;
-                      if (value != null) {
-                        _loadMesaData(value);
-                      }
-                    });
-                  },
-                  decoration: const InputDecoration(border: OutlineInputBorder()),
-                )
-              else
-                Text(
-                  'No hay mesas guardadas. Añade una desde el menú de ajustes.',
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-              const Divider(height: 32),
-              
-              Text('Entradas de Datos', style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.indigo)),
-              _buildTextField(controller: _gController, label: 'Grosor Base (G)', enabled: false),
-              _buildTextField(controller: _g1Controller, label: 'Grosor Mesa (G1)', enabled: false),
-              _buildTextField(controller: _vController, label: 'Vértice de Pivoteo (V)', enabled: false),
-              _buildTextField(controller: _angleController, label: 'Ángulo (<)'),
-              _buildTextField(controller: _gbController, label: 'Gage Block (GB)'),
-              _buildTextField(controller: _gagePinController, label: 'Diámetro de Gage Pin (Ø)'),
-              _buildTextField(controller: _hController, label: 'Altura (H)'),
-              _buildTextField(controller: _lController, label: 'Distancia Centros (L)'),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _performCalculations,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  textStyle: const TextStyle(fontSize: 18),
-                ),
-                child: const Text('Calcular'),
-              ),
-              const SizedBox(height: 24),
-              Text('Resultados', style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.indigo)),
-              const Divider(thickness: 1, height: 32),
-              _buildResultRow('Resultado Y:', _resultY),
-              Card(
-                color: Colors.indigo[50],
-                child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: _buildResultRow('DISTANCIA TOTAL (OR):', _distanciaTotalOR)),
-              ),
-              const Divider(thickness: 1, height: 32),
-              _buildResultRow('Resultado A:', _resultA),
-              _buildResultRow('Resultado B:', _resultB),
-              Card(
-                color: Colors.blue[50],
-                child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: _buildResultRow('Planer Gage Stack (A-B):', _planerGageStack)),
-              ),
-            ],
-          ),
+    );
+  }
+  
+  // Widget para construir un campo de texto con su clave y nodo de foco
+  Widget _buildTextField(String label, TextEditingController controller, [String? key]) {
+    return Padding(
+      key: key != null ? _fieldKeys[key] : null,
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: TextField(
+        controller: controller,
+        focusNode: key != null ? _focusNodes[key] : null,
+        decoration: InputDecoration(labelText: label),
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      ),
+    );
+  }
+  
+  // Widget para mostrar los resultados de forma ordenada
+  Widget _buildResultsCard() {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Resultados', style: Theme.of(context).textTheme.headlineSmall),
+            const Divider(height: 20),
+            _buildResultRow('Resultado A', resultA),
+            _buildResultRow('Resultado F', resultF),
+            _buildResultRow('Resultado B', resultB),
+            _buildResultRow('Resultado Z', resultZ),
+            _buildResultRow('Resultado Y', resultY),
+            const Divider(height: 20),
+            _buildHighlightResult('Planer Gage Stack (A-B)', planerGageStackAB),
+            _buildHighlightResult('DISTANCIA TOTAL (OR)', distanciaTotalOR),
+          ],
         ),
       ),
     );
   }
-}
-
-// --- Pantalla para Gestionar Mesas ---
-class ManageMesasScreen extends StatefulWidget {
-  const ManageMesasScreen({super.key});
-
-  @override
-  State<ManageMesasScreen> createState() => _ManageMesasScreenState();
-}
-
-class _ManageMesasScreenState extends State<ManageMesasScreen> {
-  late Future<List<MesaDeSenos>> _mesasFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshMesaList();
-  }
-
-  void _refreshMesaList() {
-    setState(() {
-      _mesasFuture = DatabaseHelper().getMesas();
-    });
-  }
-
-  void _showAddMesaDialog() {
-    final nameController = TextEditingController();
-    final gController = TextEditingController();
-    final g1Controller = TextEditingController();
-    final vController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Añadir Nueva Mesa de Senos'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Nombre')),
-                TextField(controller: gController, decoration: const InputDecoration(labelText: 'Grosor Base (G)'), keyboardType: TextInputType.number),
-                TextField(controller: g1Controller, decoration: const InputDecoration(labelText: 'Grosor Mesa (G1)'), keyboardType: TextInputType.number),
-                TextField(controller: vController, decoration: const InputDecoration(labelText: 'Vértice de Pivoteo (V)'), keyboardType: TextInputType.number),
-              ],
-            ),
+  
+  Widget _buildResultRow(String label, double value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 16)),
+          Text(
+            value.isNaN || value.isInfinite ? 'Error' : value.toStringAsFixed(4),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
-            ElevatedButton(
-              onPressed: () async {
-                final newMesa = MesaDeSenos(
-                  nombre: nameController.text,
-                  g: double.tryParse(gController.text) ?? 0.0,
-                  g1: double.tryParse(g1Controller.text) ?? 0.0,
-                  v: double.tryParse(vController.text) ?? 0.0,
-                );
-                await DatabaseHelper().insertMesa(newMesa);
-                Navigator.of(context).pop();
-                _refreshMesaList();
-              },
-              child: const Text('Guardar'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildHighlightResult(String label, double value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
+          Text(
+            value.isNaN || value.isInfinite ? 'Error' : value.toStringAsFixed(4),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
+          ),
+        ],
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gestionar Mesas'),
-      ),
-      body: FutureBuilder<List<MesaDeSenos>>(
-        future: _mesasFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text('No hay mesas guardadas.'));
-          }
-          final mesas = snapshot.data!;
-          return ListView.builder(
-            itemCount: mesas.length,
-            itemBuilder: (context, index) {
-              final mesa = mesas[index];
-              return ListTile(
-                title: Text(mesa.nombre),
-                subtitle: Text('G: ${mesa.g}, G1: ${mesa.g1}, V: ${mesa.v}'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  onPressed: () async {
-                    await DatabaseHelper().deleteMesa(mesa.id!);
-                    _refreshMesaList();
-                  },
-                ),
-              );
-            },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddMesaDialog,
-        child: const Icon(Icons.add),
-        tooltip: 'Añadir Mesa',
-      ),
-    );
+  void dispose() {
+    // Limpiar controladores y nodos de foco
+    angleController.dispose(); lengthController.dispose(); heightController.dispose();
+    distanceController.dispose(); gController.dispose(); g1Controller.dispose();
+    vController.dispose(); gbController.dispose(); gagePinController.dispose();
+    _focusNodes.forEach((key, node) => node.dispose());
+    super.dispose();
+  }
+}
+
+
+// --- Clase para Dibujar la Flecha en el Canvas ---
+class ArrowPainter extends CustomPainter {
+  final String? activeFieldKey;
+  final Map<String, GlobalKey> fieldKeys;
+  final Map<String, Offset> targetPoints;
+
+  ArrowPainter({
+    required this.activeFieldKey,
+    required this.fieldKeys,
+    required this.targetPoints,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (activeFieldKey == null) return;
+
+    final paint = Paint()
+      ..color = Colors.red
+      ..strokeWidth = 3.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    // Obtener la caja de renderizado del campo de texto activo
+    final RenderBox? fieldBox =
+        fieldKeys[activeFieldKey]!.currentContext?.findRenderObject() as RenderBox?;
+    
+    if (fieldBox == null) return;
+    
+    // Calcular el punto de inicio (desde el borde del campo de texto)
+    final fieldPosition = fieldBox.localToGlobal(Offset.zero);
+    final startPoint = Offset(fieldPosition.dx + fieldBox.size.width / 2, fieldPosition.dy);
+
+    // Obtener el punto de destino
+    final endPoint = targetPoints[activeFieldKey]!;
+
+    // Dibujar la línea
+    canvas.drawLine(startPoint, endPoint, paint);
+
+    // Dibujar la punta de la flecha
+    final path = Path();
+    final angle = atan2(endPoint.dy - startPoint.dy, endPoint.dx - startPoint.dx);
+    path.moveTo(endPoint.dx - 12 * cos(angle - 0.4), endPoint.dy - 12 * sin(angle - 0.4));
+    path.lineTo(endPoint.dx, endPoint.dy);
+    path.lineTo(endPoint.dx - 12 * cos(angle + 0.4), endPoint.dy - 12 * sin(angle + 0.4));
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant ArrowPainter oldDelegate) {
+    // Redibujar solo si el campo activo ha cambiado
+    return oldDelegate.activeFieldKey != activeFieldKey;
   }
 }
 
