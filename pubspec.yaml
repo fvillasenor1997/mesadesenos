@@ -30,6 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+    sqflite: ^2.3.0  # Para la base de datos
+    path: ^1.8.3     # Para manejar rutas de archivos
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
