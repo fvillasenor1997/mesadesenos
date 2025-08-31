@@ -85,7 +85,6 @@ class DatabaseHelper {
 
 // --- Punto de entrada de la aplicación ---
 void main() {
-  // Asegura que los bindings de Flutter estén inicializados antes de usar plugins.
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
@@ -106,7 +105,7 @@ class MyApp extends StatelessWidget {
           filled: true,
           fillColor: Colors.grey[200],
         ),
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           elevation: 4,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
@@ -129,7 +128,6 @@ class _SineBarCalculatorScreenState extends State<SineBarCalculatorScreen> {
   late Future<List<MesaDeSenos>> _loadMesasFuture;
   final dbHelper = DatabaseHelper();
   
-  // Controladores y estado de la UI
   final controllers = {
     'Angle': TextEditingController(), 'L': TextEditingController(), 'H': TextEditingController(),
     'Distancia': TextEditingController(), 'G': TextEditingController(), 'G1': TextEditingController(),
@@ -144,7 +142,6 @@ class _SineBarCalculatorScreenState extends State<SineBarCalculatorScreen> {
   final Map<String, FocusNode> _focusNodes = {};
   String? _activeFieldKey;
   
-  // --- CAMBIO: Se definen rectángulos para resaltar en lugar de puntos de destino ---
   final Map<String, Rect> _highlightRects = {
     'G': Rect.fromCenter(center: const Offset(190, 240), width: 30, height: 30),
     'G1': Rect.fromCenter(center: const Offset(190, 180), width: 35, height: 30),
@@ -219,7 +216,16 @@ class _SineBarCalculatorScreenState extends State<SineBarCalculatorScreen> {
             onPressed: () async {
               await _showManageMesasDialog();
               setState(() {
-                _loadMesasFuture = dbHelper.getMesas();
+                // Recarga la lista de mesas después de cerrar el diálogo
+                _loadMesasFuture = dbHelper.getMesas().then((mesas) {
+                    if (mesas.isNotEmpty && _selectedMesa == null) {
+                        _selectedMesa = mesas.first;
+                        _updateControllersFromMesa(_selectedMesa!);
+                    } else if (mesas.isEmpty) {
+                        _selectedMesa = null;
+                    }
+                    return mesas;
+                });
               });
             },
           ),
@@ -274,10 +280,13 @@ class _SineBarCalculatorScreenState extends State<SineBarCalculatorScreen> {
                   ],
                 ),
               ),
-              // --- CAMBIO: Se usa el nuevo HighlightPainter en lugar de ArrowPainter ---
-              CustomPaint(
-                painter: HighlightPainter(_activeFieldKey, _highlightRects),
-                child: Container(),
+              // --- SOLUCIÓN: Se envuelve el CustomPaint en un IgnorePointer ---
+              // Esto permite que los gestos de scroll y taps pasen a través.
+              IgnorePointer(
+                child: CustomPaint(
+                  painter: HighlightPainter(_activeFieldKey, _highlightRects),
+                  child: Container(),
+                ),
               ),
             ],
           );
@@ -417,18 +426,21 @@ class _ManageMesasDialogState extends State<ManageMesasDialog> {
       title: const Text('Gestionar Mesas de Senos'),
       content: SizedBox(
         width: double.maxFinite,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre')),
-            TextField(controller: gCtrl, decoration: const InputDecoration(labelText: 'G'), keyboardType: TextInputType.number),
-            TextField(controller: g1Ctrl, decoration: const InputDecoration(labelText: 'G1'), keyboardType: TextInputType.number),
-            TextField(controller: vCtrl, decoration: const InputDecoration(labelText: 'V'), keyboardType: TextInputType.number),
-            const SizedBox(height: 8),
-            ElevatedButton(onPressed: _addMesa, child: const Text('Añadir / Actualizar Mesa')),
-            const Divider(),
-            Expanded(child: _buildMesaList()),
-          ],
+        // Usar SingleChildScrollView para evitar overflow si la lista es larga
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre')),
+              TextField(controller: gCtrl, decoration: const InputDecoration(labelText: 'G'), keyboardType: TextInputType.number),
+              TextField(controller: g1Ctrl, decoration: const InputDecoration(labelText: 'G1'), keyboardType: TextInputType.number),
+              TextField(controller: vCtrl, decoration: const InputDecoration(labelText: 'V'), keyboardType: TextInputType.number),
+              const SizedBox(height: 8),
+              ElevatedButton(onPressed: _addMesa, child: const Text('Añadir / Actualizar Mesa')),
+              const Divider(),
+              _buildMesaList(), // El FutureBuilder manejará la lista
+            ],
+          ),
         ),
       ),
       actions: [ TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cerrar')) ],
@@ -440,8 +452,10 @@ class _ManageMesasDialogState extends State<ManageMesasDialog> {
       future: _mesasFuture,
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        // El ListView debe tener shrinkWrap para funcionar dentro de SingleChildScrollView
         return ListView(
           shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(), // El scroll lo maneja el padre
           children: snapshot.data!.map((mesa) => ListTile(
             title: Text(mesa.nombre),
             trailing: IconButton(
@@ -458,7 +472,7 @@ class _ManageMesasDialogState extends State<ManageMesasDialog> {
   }
 }
 
-// --- CAMBIO: Se reemplaza ArrowPainter por HighlightPainter ---
+// --- Clase para Dibujar el Resaltado ---
 class HighlightPainter extends CustomPainter {
   final String? activeFieldKey;
   final Map<String, Rect> highlightRects;
@@ -476,7 +490,6 @@ class HighlightPainter extends CustomPainter {
 
     final rectToDraw = highlightRects[activeFieldKey];
     if (rectToDraw != null) {
-      // Dibuja un rectángulo redondeado para un look más suave
       canvas.drawRRect(
         RRect.fromRectAndRadius(rectToDraw, const Radius.circular(4)),
         paint,
