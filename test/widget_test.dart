@@ -11,20 +11,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mesadesenos/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Calculator Smoke Test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
+    // Verifica que el título de la aplicación se muestra en la AppBar.
+    expect(find.text('Calculadora de Mesa de Senos'), findsOneWidget);
+
+    // Verifica que el botón para calcular existe.
+    expect(find.text('Calcular'), findsOneWidget);
+    
+    // Verifica que no hay un widget con el texto '1', que es parte del test
+    // por defecto que fallaba.
     expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
   });
 }
