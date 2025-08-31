@@ -1,34 +1,44 @@
+# Nombre del proyecto.
 name: mesadesenos
+# Descripción del proyecto.
 description: Una calculadora de mesa de senos.
-
 # Previene publicaciones accidentales en pub.dev.
 publish_to: 'none' 
-
+# Versión del proyecto.
 version: 1.0.0+1
 
+# Define la versión de Dart compatible.
 environment:
   sdk: '>=3.0.0 <4.0.0'
 
-# ===================================================================
-# SECCIÓN CORREGIDA
-# ===================================================================
-# Las dependencias deben estar al mismo nivel de indentación.
+# Lista de dependencias que la aplicación necesita para funcionar.
 dependencies:
+  # Dependencia principal para construir aplicaciones con Flutter.
   flutter:
     sdk: flutter
 
-  # Cada una de estas es una dependencia separada.
+  # Paquete para usar la base de datos SQLite.
   sqflite: ^2.3.0
+  # Paquete para manejar rutas de archivos del sistema.
   path: ^1.8.3
+  # Paquete para los iconos de estilo iOS.
   cupertino_icons: ^1.0.8
 
+# Dependencias que solo se usan durante el desarrollo y las pruebas.
 dev_dependencies:
+  # Framework de pruebas de Flutter.
   flutter_test:
     sdk: flutter
 
+  # Reglas de análisis de código para mantener un código limpio.
   flutter_lints: ^2.0.0
 
-# Configuración específica de Flutter.
+# Configuración específica para el framework de Flutter.
 flutter:
+  # Habilita el uso de los widgets y temas de Material Design.
   uses-material-design: true
+
+  # Define la carpeta de recursos (imágenes, fuentes, etc.).
+  assets:
     - assets/
+
