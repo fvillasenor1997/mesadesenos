@@ -1,4 +1,4 @@
-name: mi_calculadora
+name: mesadesenos
 description: Una calculadora de mesa de senos.
 
 # Previene publicaciones accidentales en pub.dev.
@@ -35,3 +35,4 @@ flutter:
   # Si tienes assets (imágenes, fuentes), se declaran aquí.
   # assets:
   #   - assets/images/
+
